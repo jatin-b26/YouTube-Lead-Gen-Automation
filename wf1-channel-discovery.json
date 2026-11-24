@@ -1,0 +1,698 @@
+{
+  "name": "YT Lead Gen - WF1 Channel Discovery",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 9 * * *"
+            }
+          ]
+        }
+      },
+      "id": "72dd4e04-dd7c-4d8b-8932-f433e85d4396",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        128,
+        -96
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ───────────────────────────────────────────────────────────────\n// SET NICHES NODE - 15 Keyword Variations\n// 5 niches × 3 keywords each = 15 total searches\n// ───────────────────────────────────────────────────────────────\n \nconst niches = [\n  // 1 Real Estate (3)\n  { name: 'Real Estate', keyword: 'luxury home tour real estate' },\n  { name: 'Real Estate', keyword: 'property investment opportunity' },\n  { name: 'Real Estate', keyword: 'property market analysis' },\n  \n  // 2 Finance (3)\n  { name: 'Finance', keyword: 'how to invest money' },\n  { name: 'Finance', keyword: 'day trading strategies' },\n  { name: 'Finance', keyword: 'passive income investing' },\n  \n  // 3 Business (3)\n  { name: 'Business', keyword: 'how to start a business' },\n  { name: 'Business', keyword: 'scale business revenue' },\n  { name: 'Business', keyword: 'profitable business ideas' },\n  \n  // 4 AI/Tech (3)\n  { name: 'AI', keyword: 'best AI tools 2026' },\n  { name: 'AI', keyword: 'how to use AI productivity' },\n  { name: 'AI', keyword: 'AI for business owners' },\n  \n  //5  Law (3)\n  { name: 'Law', keyword: 'legal rights explained' },\n  { name: 'Law', keyword: 'lawyer advice tips' },\n  { name: 'Law', keyword: 'police encounter rights' }\n];\n \nreturn niches.map(n => ({ json: n }));\n"
+      },
+      "id": "957c43db-acd2-43e6-9c9c-2849f847e659",
+      "name": "Set Niches",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        320,
+        -96
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ───────────────────────────────────────────────────────────────\n// EXTRACT CHANNEL IDs NODE (With Built-in Sheet Deduplication)\n// ───────────────────────────────────────────────────────────────\n \nconst nicheMapping = [\n  'Real Estate', 'Real Estate', 'Real Estate',\n  'Finance', 'Finance', 'Finance',\n  'Business', 'Business', 'Business',\n  'AI', 'AI', 'AI',\n  'Law', 'Law', 'Law'\n];\n \nconst seen = new Set();\nconst out = [];\n \n// Dynamically pull existing leads to instantly deduplicate\ntry {\n  const existingRows = $(\"Get Existing Leads\").all();\n  for (const row of existingRows) {\n    const url = row.json[\"Channel URL\"] || \"\";\n    const id = url.split(\"/\").pop();\n    if (id) seen.add(id);\n  }\n} catch (e) {\n  console.log(\"No existing leads found in Google Sheet yet or node skipped.\");\n}\n \nconst items = $input.all();\n \nfor (let i = 0; i < items.length; i++) {\n  const niche = nicheMapping[i] || 'Unknown';\n  const videos = items[i].json.items || [];\n  \n  for (const v of videos) {\n    const channelId = v.snippet?.channelId;\n    if (!channelId || seen.has(channelId)) continue;\n    \n    seen.add(channelId);\n    out.push({\n      json: {\n        channelId,\n        niche\n      }\n    });\n  }\n}\n \nreturn out;"
+      },
+      "id": "e7141614-13ff-41a7-bcb5-b8e9d6407abf",
+      "name": "Extract Channel IDs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        784,
+        -96
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ───────────────────────────────────────────────────────────────\n// WF1 - ZENTRIX LEAD ENGINE (Optimized Flow Order + GSheet Status Fix)\n// ───────────────────────────────────────────────────────────────\n\nconst helpers = this.helpers;\n\nconsole.log(\"🚀 Zentrix Lead Engine: Initializing Processing Block...\");\n\n// ─── HELPER FUNCTIONS ───────────────────────────────────────────\n\nfunction formatNumber(num) {\n  if (num >= 1000000) return Math.round(num / 1000000) + 'M';\n  if (num >= 1000) return Math.round(num / 1000) + 'K';\n  return num.toString();\n}\n\nfunction formatDate(dateStr) {\n  const date = new Date(dateStr);\n  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];\n  return `${date.getDate()}-${months[date.getMonth()]}`;\n}\n\nfunction detectCountryFromContent(text) {\n  if (!text) return null;\n  const lowerText = text.toLowerCase();\n  \n  const southAsianIndicators = {\n    'IN': ['hindi', 'mumbai', 'delhi', 'bangalore', 'kolkata', 'chennai', 'hyderabad', 'भारत', 'भाषा', 'हिंदी', 'rupee', 'rupees', 'lakh', 'crore', 'india'],\n    'PK': ['urdu', 'pakistan', 'karachi', 'lahore', 'islamabad', 'پاکستان', 'اردو'],\n    'BD': ['bangladesh', 'dhaka', 'bangla', 'bengali', 'বাংলা'],\n    'LK': ['sri lanka', 'colombo', 'sinhala', 'tamil sri', 'ශ්‍රී ලංකා'],\n    'NP': ['nepal', 'kathmandu', 'nepali', 'नेपाल'],\n    'AF': ['afghanistan', 'kabul', 'dari', 'pashto', 'افغانستان'],\n    'BT': ['bhutan', 'thimphu', 'dzongkha'],\n    'MV': ['maldives', 'malé', 'dhivehi']\n  };\n  \n  for (const [country, indicators] of Object.entries(southAsianIndicators)) {\n    for (const indicator of indicators) {\n      if (lowerText.includes(indicator)) return country;\n    }\n  }\n  \n  const targetCountryIndicators = {\n    'US': ['new york', 'los angeles', 'chicago', 'houston', 'usa', 'america', 'american'],\n    'GB': ['london', 'manchester', 'birmingham', 'uk', 'britain', 'british', 'england'],\n    'CA': ['toronto', 'vancouver', 'montreal', 'canada', 'canadian'],\n    'AU': ['sydney', 'melbourne', 'brisbane', 'australia', 'australian', 'aussie'],\n    'DE': ['berlin', 'munich', 'hamburg', 'germany', 'german', 'deutsch'],\n    'FR': ['paris', 'marseille', 'lyon', 'france', 'french', 'français'],\n    'ES': ['madrid', 'barcelona', 'spain', 'spanish', 'español'],\n    'IT': ['rome', 'milan', 'italy', 'italian', 'italiano'],\n    'NL': ['amsterdam', 'netherlands', 'dutch', 'holland'],\n    'SE': ['stockholm', 'sweden', 'swedish', 'sverige'],\n    'NO': ['oslo', 'norway', 'norwegian', 'norge'],\n    'DK': ['copenhagen', 'denmark', 'danish', 'danmark'],\n    'NZ': ['auckland', 'wellington', 'new zealand', 'kiwi']\n  };\n  \n  for (const [country, indicators] of Object.entries(targetCountryIndicators)) {\n    for (const indicator of indicators) {\n      if (lowerText.includes(indicator)) return country;\n    }\n  }\n  \n  return null;\n}\n\n// ─── MAIN LOGIC ─────────────────────────────────────────────────\n\nconst YOUTUBE_KEYS = ['YOUR_YOUTUBE_API_KEY', 'YOUR_YOUTUBE_API_KEY']; \nconst GROQ_API_KEY = 'YOUR_GROQ_API_KEY';\nconst BLACKLISTED_COUNTRIES = ['IN', 'PK', 'LK', 'NP', 'BD', 'AF', 'BT', 'MV'];\n\nlet channels = [];\ntry {\n  channels = $input.all();\n} catch (e) {\n  channels = Array.isArray($json) ? $json : [$json];\n}\n\nconst output = [];\nconsole.log(`📥 Total incoming queue count received: ${channels.length} channels.`);\n\nasync function fetchWithRotation(urlBuilder) {\n  let lastError;\n  for (let i = 0; i < YOUTUBE_KEYS.length; i++) {\n    const activeKey = YOUTUBE_KEYS[i];\n    const finalUrl = urlBuilder(activeKey);\n    try {\n      return await helpers.request({ url: finalUrl, method: 'GET', json: true });\n    } catch (err) {\n      lastError = err;\n      const errorMsg = String(err.message || err.description || '');\n      if (errorMsg.includes('403') || errorMsg.toLowerCase().includes('quota')) {\n        console.warn(`🔄 YouTube Key #${i} Quota hit. Rotating to next key...`);\n        continue; \n      }\n      throw err;\n    }\n  }\n  throw lastError;\n}\n\nfor (const item of channels) {\n  const channelId = item.json?.channelId || item.channelId;\n  const niche = item.json?.niche || item.niche || 'Unknown';\n\n  if (!channelId) {\n    console.warn(\"⚠️ Item missing target channelId property. Skipping.\");\n    continue;\n  }\n\n  console.log(`\\n🔎 Processing Channel ID: ${channelId} (${niche})`);\n\n  try {\n    const channelData = await fetchWithRotation((key) => \n      `https://www.googleapis.com/youtube/v3/channels?part=snippet,statistics,brandingSettings,contentDetails&id=${channelId}&key=${key}`\n    );\n\n    if (!channelData || !channelData.items || channelData.items.length === 0) {\n      console.log(`❌ YouTube API returned no metadata for ID: ${channelId}.`);\n      continue;\n    }\n\n    const channel = channelData.items[0];\n    const stats = channel.statistics || {};\n    const snippet = channel.snippet || {};\n    const branding = channel.brandingSettings || {};\n\n    const subscriberCount = parseInt(stats.subscriberCount || 0);\n    let country = snippet.country || '';\n    const description = snippet.description || '';\n    const channelName = snippet.title || 'Unknown Creator';\n\n    // ─── 1️⃣ FIRST FILTER: Subscriber Count Range (5K - 1M) ───────────────────\n    if (subscriberCount < 5000 || subscriberCount > 1000000) {\n      console.log(`⏩ Skipped \"${channelName}\": Outside subscriber limits (${subscriberCount} subs).`);\n      continue;\n    }\n\n    const uploadsPlaylistId = channel.contentDetails?.relatedPlaylists?.uploads;\n    if (!uploadsPlaylistId) {\n      console.log(`⏩ Skipped \"${channelName}\": Upload playlist history ID not reachable.`);\n      continue;\n    }\n\n    const videosData = await fetchWithRotation((key) =>\n      `https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&playlistId=${uploadsPlaylistId}&maxResults=10&key=${key}`\n    );\n\n    if (!videosData || !videosData.items || videosData.items.length === 0) {\n      console.log(`⏩ Skipped \"${channelName}\": No uploaded videos returned from playlist payload.`);\n      continue;\n    }\n\n    // ─── 2️⃣ SECOND FILTER: Upload Recency (Last 14 Days) ─────────────────────\n    const latestVideo = videosData.items[0];\n    const publishedAt = new Date(latestVideo.snippet.publishedAt);\n    const daysSinceUpload = (Date.now() - publishedAt.getTime()) / (1000 * 60 * 60 * 24);\n    if (daysSinceUpload > 14) {\n      console.log(`⏩ Skipped \"${channelName}\": Inactive channel. Last upload was ${Math.round(daysSinceUpload)} days ago.`);\n      continue;\n    }\n\n    // ─── 3️⃣ THIRD FILTER: Geolocation Country Blacklist ──────────────────────\n    if (country === '') {\n      let detectedCountry = detectCountryFromContent(description);\n      if (!detectedCountry) {\n        const videoText = videosData.items.map(v => v.snippet.title + ' ' + (v.snippet.description || '')).join(' ');\n        detectedCountry = detectCountryFromContent(videoText);\n      }\n      if (detectedCountry) country = detectedCountry;\n    }\n    if (BLACKLISTED_COUNTRIES.includes(country)) {\n      console.log(`⏩ Skipped \"${channelName}\": Region Blacklisted (${country}).`);\n      continue;\n    }\n\n    // ─── 4️⃣ FOURTH FILTER: Engagement Metric Rate (5% - 50% Cap Window) ──────\n    const videoIds = videosData.items.map(v => v.snippet.resourceId.videoId).join(',');\n    const videoStats = await fetchWithRotation((key) =>\n      `https://www.googleapis.com/youtube/v3/videos?part=statistics&id=${videoIds}&key=${key}`\n    );\n\n    if (!videoStats || !videoStats.items || videoStats.items.length === 0) {\n      console.log(`⏩ Skipped \"${channelName}\": Video sub-statistics failed to retrieve.`);\n      continue;\n    }\n\n    const totalViews = videoStats.items.reduce((sum, v) => sum + parseInt(v.statistics.viewCount || 0), 0);\n    const avgViews = Math.round(totalViews / videoStats.items.length);\n    const divisor = subscriberCount > 0 ? subscriberCount : 1;\n    const engagementRatio = ((avgViews / divisor) * 100).toFixed(2);\n\n    if (parseFloat(engagementRatio) < 5.00 || parseFloat(engagementRatio) > 50.00) {\n      console.log(`⏩ Skipped \"${channelName}\": Outside engagement range limits (${engagementRatio}%).`);\n      continue;\n    }\n\n    // ─── 5️⃣ FIFTH STEP: Contact Verification & Extraction Framework ──────────\n    const videoDescriptions = videosData.items.slice(0, 5).map(v => v.snippet.description || '');\n    const emailRegex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}/;\n    let email = description.match(emailRegex)?.[0];\n    \n    if (!email && branding && branding.channel) {\n      const combinedText = (branding.channel.keywords || '') + ' ' + (branding.channel.description || '');\n      email = combinedText.match(emailRegex)?.[0];\n    }\n    if (!email) {\n      for (const videoDesc of videoDescriptions) {\n        email = videoDesc.match(emailRegex)?.[0];\n        if (email) break;\n      }\n    }\n\n    let targetExternalUrl = \"\";\n    if (!email) {\n      const combinedBodyText = description + \" \" + videoDescriptions.join(\" \");\n      const urlRegex = /(https?:\\/\\/(?:www\\.)?(?:linktr\\.ee|instagram\\.com|tiktok\\.com|twitter\\.com|[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,5})[^\\s()<>]+)/gi;\n      const foundUrls = combinedBodyText.match(urlRegex) || [];\n      const cleanUrls = foundUrls.filter(u => !u.toLowerCase().includes('youtube.com') && !u.toLowerCase().includes('youtu.be'));\n      if (cleanUrls.length > 0) {\n        targetExternalUrl = cleanUrls[0];\n      }\n    }\n\n    let emailDraft = \"Pending Deep Scrape Engine\";\n    let routingStatus = \"\";\n\n    // ─── PAYLOAD BLOCK 1: DEEP SCRAPE ROUTING ───\n    if (!email) {\n      if (targetExternalUrl !== \"\") {\n        console.log(`⚠️ No immediate email found for \"${channelName}\". Routing to -> Deep Scrape Required.`);\n        routingStatus = \"Deep Scrape Required\";\n        email = \"Pending Link Extraction\";\n        \n        output.push({\n          json: {\n            'Channel Name': channelName,\n            'Email': email,\n            'Niche': niche,\n            'Subscribers': formatNumber(subscriberCount),\n            'Avg Views': formatNumber(avgViews),\n            'View/Sub Ratio%': engagementRatio,\n            'Last Upload Date': formatDate(latestVideo.snippet.publishedAt),\n            'Description': description.substring(0, 300),\n            'Cold Email Draft': emailDraft,\n            'Channel URL': `https://www.youtube.com/channel/${channelId}`,\n            'Target External Link': targetExternalUrl,\n            'Date Added': new Date().toISOString().split('T')[0],\n            'Status': 'New',              // Writes \"New\" to Google Sheets column\n            'RoutingStatus': routingStatus // Directs your canvas Switch node\n          }\n        });\n        continue;\n      } else {\n        console.log(`⏩ Skipped \"${channelName}\": No email found and no off-site social links available to scrape.`);\n        continue;\n      }\n    }\n\n    // ─── PAYLOAD BLOCK 2: DIRECT LEAD ROUTING ───\n    console.log(`🎯 Email located directly for \"${channelName}\". Running Groq Generator...`);\n    routingStatus = \"Direct Lead\";\n\n    const groqPrompt = `You are Aryan from Zentrix Media reaching out to a YouTube creator.\nChannel: ${channelName}\nSubscribers: ${formatNumber(subscriberCount)}\nNiche: ${niche}\nAvg Views: ${formatNumber(avgViews)}\nEngagement: ${engagementRatio}% view-to-subscriber ratio\n\nWrite a short, human cold email (60-80 words max). Structure:\n1. Start with genuine praise about their channel or content (be specific, not generic)\n2. Softly mention their ${engagementRatio}% engagement ratio and how it could be higher\n3. Brief pitch: professional video editing can boost retention and views\n4. Include: https://zentrixmedia.in/\n5. Sign off: \"Looking forward to taking your channel to the next level. Regards, Aryan | Zentrix Media\"\n\nRules:\n- NEVER use: \"I came across\", \"I hope this finds you\", \"reaching out\", \"I wanted to\", \"I noticed\", \"I stumbled upon\"\n- Sound like a peer, not a salesperson\n- Keep it conversational and warm\n- Total email: 60-80 words maximum\n- NEVER use em dashes (—), fancy quotes (\"\"), or any AI-sounding punctuation\n- Use simple dashes (-), regular quotes, and basic punctuation only\n- Sound like a real person typing an email\n\nFormat:\nSubject: [short, specific subject line]\n\n[email body - 60-80 words max]`;\n\n    try {\n      const groqPayload = {\n        model: 'llama-3.3-70b-versatile',\n        messages: [{ role: 'user', content: groqPrompt }],\n        temperature: 0.7,\n        max_tokens: 300\n      };\n\n      const groqData = await helpers.request({\n        url: 'https://api.groq.com/openai/v1/chat/completions',\n        method: 'POST',\n        body: groqPayload,\n        headers: {\n          'Authorization': `Bearer ${GROQ_API_KEY}`,\n          'Content-Type': 'application/json'\n        },\n        json: true\n      });\n\n      if (groqData?.choices?.[0]?.message?.content) {\n        emailDraft = groqData.choices[0].message.content.trim();\n      }\n    } catch (groqErr) {\n      console.error(`⚠️ Groq AI API Generation failed for ${channelName}:`, groqErr.message);\n      emailDraft = \"Direct Lead - AI Draft generation timeout/error.\";\n    }\n\n    output.push({\n      json: {\n        'Channel Name': channelName,\n        'Email': email,\n        'Niche': niche,\n        'Subscribers': formatNumber(subscriberCount),\n        'Avg Views': formatNumber(avgViews),\n        'View/Sub Ratio%': engagementRatio,\n        'Last Upload Date': formatDate(latestVideo.snippet.publishedAt),\n        'Description': description.substring(0, 300),\n        'Cold Email Draft': emailDraft,\n        'Channel URL': `https://www.youtube.com/channel/${channelId}`,\n        'Target External Link': targetExternalUrl,\n        'Date Added': new Date().toISOString().split('T')[0],\n        'Status': 'New',              \n        'RoutingStatus': routingStatus // Directs your canvas Switch node\n      }\n    });\n\n  } catch (loopError) {\n    console.error(`💥 Structural API breakdown parsing Channel item ${channelId}:`, loopError.message);\n    continue;\n  }\n}\n\nconsole.log(`\\n🏁 Processing Execution Finished! Total valid leads saved to stream: ${output.length}`);\nreturn output;"
+      },
+      "id": "338f8818-7e38-4de9-8085-37867911832c",
+      "name": "Fetch Filter and Email",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1024,
+        -96
+      ],
+      "executeOnce": false
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_SHEET_ID",
+          "mode": "list",
+          "cachedResultName": "YT Lead",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/YOUR_GOOGLE_SHEET_ID/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Sheet1",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/YOUR_GOOGLE_SHEET_ID/edit#gid=0"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Channel Name": "={{ $json['Channel Name'] }}",
+            "Email": "={{ $json['Email'] }}",
+            "Niche": "={{ $json['Niche'] }}",
+            "Subscribers": "={{ $json['Subscribers'] }}",
+            "Avg Views": "={{ $json['Avg Views'] }}",
+            "View/Sub Ratio %": "={{ $json['View/Sub Ratio%'] }}",
+            "Last Upload Date": "={{ $json['Last Upload Date'] }}",
+            "Description": "={{ $json['Description'] }}",
+            "Cold Email Draft": "={{ $json['Cold Email Draft'] }}",
+            "Channel URL": "={{ $json['Channel URL'] }}",
+            "Date Added": "={{ new Date().toISOString().split('T')[0] }}",
+            "Status": "={{ $json['Status'] }}",
+            "Target External Link": "={{ $json[\"Target External Link\"] }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "Channel Name",
+              "displayName": "Channel Name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Email",
+              "displayName": "Email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Target External Link",
+              "displayName": "Target External Link",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Niche",
+              "displayName": "Niche",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Subscribers",
+              "displayName": "Subscribers",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Avg Views",
+              "displayName": "Avg Views",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "View/Sub Ratio %",
+              "displayName": "View/Sub Ratio %",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Last Upload Date",
+              "displayName": "Last Upload Date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Description",
+              "displayName": "Description",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Cold Email Draft",
+              "displayName": "Cold Email Draft",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Channel URL",
+              "displayName": "Channel URL",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Date Added",
+              "displayName": "Date Added",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Status",
+              "displayName": "Status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "5a66a491-f821-4898-8127-91238be4a2f5",
+      "name": "Append to Google Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.2,
+      "position": [
+        1360,
+        -400
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_SHEET_ID",
+          "mode": "list",
+          "cachedResultName": "YT Lead",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/YOUR_GOOGLE_SHEET_ID/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Sheet1",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/YOUR_GOOGLE_SHEET_ID/edit#gid=0"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        128,
+        -256
+      ],
+      "id": "71f9299f-c7ea-4fdc-b4c0-8ff6ca01e7a4",
+      "name": "Get Existing Leads",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "https://www.googleapis.com/youtube/v3/search",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "part",
+              "value": "snippet"
+            },
+            {
+              "name": "type",
+              "value": "video"
+            },
+            {
+              "name": "order",
+              "value": "date"
+            },
+            {
+              "name": "publishedAfter",
+              "value": "={{ new Date(Date.now() - 7*24*60*60*1000).toISOString() }}"
+            },
+            {
+              "name": "q",
+              "value": "={{ $json.keyword }}"
+            },
+            {
+              "name": "maxResults",
+              "value": "50"
+            },
+            {
+              "name": "key",
+              "value": "YOUR_YOUTUBE_API_KEY"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "ea4412a4-0c5a-48ca-a18c-4cd7caf1dc65",
+      "name": "YouTube Search-1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        528,
+        -96
+      ],
+      "alwaysOutputData": false,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "url": "https://www.googleapis.com/youtube/v3/search",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "part",
+              "value": "snippet"
+            },
+            {
+              "name": "type",
+              "value": "video"
+            },
+            {
+              "name": "order",
+              "value": "date"
+            },
+            {
+              "name": "publishedAfter",
+              "value": "={{ new Date(Date.now() - 7*24*60*60*1000).toISOString() }}"
+            },
+            {
+              "name": "q",
+              "value": "={{ $json.keyword }}"
+            },
+            {
+              "name": "maxResults",
+              "value": "50"
+            },
+            {
+              "name": "key",
+              "value": "YOUR_YOUTUBE_API_KEY"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "0185db59-336c-41d2-8310-865e905492d1",
+      "name": "YouTube Search-2",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        528,
+        -256
+      ],
+      "alwaysOutputData": false
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.RoutingStatus }}",
+                    "rightValue": "Direct Lead",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "a436dfa1-b4b1-4602-874b-85096f4408d9"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Direct Lead"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "e37cc41a-32cd-479f-9d7b-2328abf9ae0a",
+                    "leftValue": "={{ $json.RoutingStatus }}",
+                    "rightValue": "Deep Scrape Required",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Deep Scrape"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        1248,
+        -96
+      ],
+      "id": "0c3441c9-c240-4898-867f-4a1751328e40",
+      "name": "Switch"
+    },
+    {
+      "parameters": {
+        "url": "https://app.scrapingbee.com/api/v1",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "api_key",
+              "value": "YOUR_SCRAPINGBEE_API_KEY"
+            },
+            {
+              "name": "url",
+              "value": "={{ $json[\"Target External Link\"] }}"
+            },
+            {
+              "name": "extract_rules",
+              "value": "{\"emails\":\"body\"}"
+            },
+            {
+              "name": "block_resources",
+              "value": "false"
+            },
+            {
+              "name": "block_resources",
+              "value": "false"
+            }
+          ]
+        },
+        "options": {
+          "batching": {
+            "batch": {
+              "batchSize": 1,
+              "batchInterval": 2000
+            }
+          },
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1536,
+        -80
+      ],
+      "id": "ac1587c0-a071-493b-bec6-44ede070245a",
+      "name": "scrapingbee API request"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ───────────────────────────────────────────────────────────────\n// WF1 - UNIVERSAL DEEP SCRAPE RESOLVER (Text & JSON Input Mode)\n// ───────────────────────────────────────────────────────────────\n\nconsole.log(\"🕵️ Processing Deep Scrape Response payload...\");\n\n// Capture incoming properties safely from your spreadsheet loop\nconst channelName = $json[\"Channel Name\"] || \"Unknown Channel\";\nconst targetLink = $json[\"Target External Link\"] || \"\";\n\nlet extractedEmail = null;\nlet statusReason = \"No Email Found On Site\";\nconst emailRegex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}/gi;\n\n// 🛑 1. Check for basic HTTP error tags passed down\nif ($json.httpCode && String($json.httpCode) !== \"200\") {\n  console.log(`⏩ Warning for \"${channelName}\": Page returned an error code (${$json.httpCode}).`);\n  statusReason = `Scrape Failed (HTTP ${$json.httpCode})`;\n} else {\n\n  // 🛑 2. Convert incoming payload safely into a readable string\n  let textToScan = \"\";\n  \n  if ($json.data && typeof $json.data === \"string\") {\n    textToScan = $json.data;\n  } else if ($json.body && typeof $json.body === \"string\") {\n    textToScan = $json.body;\n  } else if (typeof $json === \"string\") {\n    textToScan = $json;\n  } else {\n    textToScan = JSON.stringify($json || \"\");\n  }\n\n  // 🛑 3. Try to extract from a nested json pattern first (in case ScrapingBee returned a JSON-string)\n  try {\n    const parsed = JSON.parse(textToScan);\n    if (parsed && parsed.emails) {\n      if (Array.isArray(parsed.emails) && parsed.emails.length > 0) {\n        extractedEmail = parsed.emails[0];\n      } else if (parsed.emails.emails && Array.isArray(parsed.emails.emails) && parsed.emails.emails.length > 0) {\n        extractedEmail = parsed.emails.emails[0];\n      } else if (typeof parsed.emails === \"string\") {\n        textToScan = parsed.emails;\n      }\n    }\n  } catch (e) {\n    // It's pure plain HTML/Text data, which is perfect - moving to raw scan\n  }\n\n  // 🛑 4. Fallback: Run deep regex scanner across the text block\n  if (!extractedEmail && textToScan && !textToScan.includes('-webkit-font-smoothing')) {\n    const matches = textToScan.match(emailRegex);\n    if (matches && matches.length > 0) {\n      // Filter out system scripts masking as addresses\n      const cleanLeads = matches.filter(email => {\n        const lower = email.toLowerCase();\n        return !lower.includes('sentry.io') && !lower.includes('wix.com') && !lower.includes('git') && !lower.includes('cloudflare');\n      });\n      if (cleanLeads.length > 0) {\n        extractedEmail = cleanLeads[0];\n      }\n    }\n  }\n}\n\n// ─── ALWAYS RETURN AN OBJECT TO KEEP THE LOOP ALIVE ───────────\n\nif (extractedEmail) {\n  extractedEmail = String(extractedEmail).trim().toLowerCase();\n  console.log(`🎯 Deep Scrape Success! Captured email: ${extractedEmail} for ${channelName}`);\n  \n  return {\n    ...$json,\n    \"Email\": extractedEmail,\n    \"EmailStatus\": \"Found\",\n    \"RoutingStatus\": \"Direct Lead\"\n  };\n} else {\n  console.log(`⏩ Deep Scrape Unsuccessful for ${channelName}. Reason: ${statusReason}`);\n  \n  return {\n    ...$json,\n    \"Email\": \"N/A\",\n    \"EmailStatus\": \"Failed\",\n    \"RoutingStatus\": \"No Email Located\"\n  };\n}"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1744,
+        -80
+      ],
+      "id": "b77c364b-d5a3-4773-91ca-dcfe6b866301",
+      "name": "Email Extraction Filter",
+      "executeOnce": false
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.groq.com/openai/v1/chat/completions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer YOUR_GROQ_API_KEY"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"llama-3.3-70b-versatile\",\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": \"You are Aryan from Zentrix Media reaching out to a YouTube creator.\\n\\nChannel: {{ $json['Channel Name'] }}\\nSubscribers: {{ $json['Subscribers'] }}\\nNiche: {{ $json['Niche'] }}\\nAvg Views: {{ $json['Avg Views'] }}\\nEngagement: {{ $json['View/Sub Ratio %'] }} view-to-subscriber ratio\\n\\nWrite a short, human cold email (60-80 words max). Structure:\\n1. Start with genuine praise about their channel or content (be specific, not generic)\\n2. Softly mention their engagement ratio and how it could be higher\\n3. Brief pitch: professional video editing can boost retention and views\\n4. Include: https://zentrixmedia.in/\\n5. Sign off: \\\"Looking forward to taking your channel to the next level. Regards, Aryan | Zentrix Media\\\"\\n\\nRules:\\n- NEVER use: \\\"I came across\\\", \\\"I hope this finds you\\\", \\\"reaching out\\\", \\\"I wanted to\\\", \\\"I noticed\\\", \\\"I stumbled upon\\\"\\n- Sound like a peer, not a salesperson\\n- Keep it conversational and warm\\n- Total email: 60-80 words maximum\\n- NEVER use em dashes (—), fancy quotes (“”), or any AI-sounding punctuation\\n- Use simple dashes (-), regular quotes, and basic punctuation only\\n- Sound like a real person typing an email\\n\\nFormat:\\nSubject: [short, specific subject line]\\n\\n[email body - 60-80 words max]\"\n    }\n  ],\n  \"temperature\": 0.7,\n  \"max_tokens\": 300\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1968,
+        -80
+      ],
+      "id": "a6b92438-1fc1-4a24-8157-0420af3b9deb",
+      "name": "Deep Scrape Groq AI Prompt."
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Get Existing Leads",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Niches": {
+      "main": [
+        [
+          {
+            "node": "YouTube Search-1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Channel IDs": {
+      "main": [
+        [
+          {
+            "node": "Fetch Filter and Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Filter and Email": {
+      "main": [
+        [
+          {
+            "node": "Switch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Existing Leads": {
+      "main": [
+        [
+          {
+            "node": "Set Niches",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "YouTube Search-1": {
+      "main": [
+        [
+          {
+            "node": "Extract Channel IDs",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "YouTube Search-2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "YouTube Search-2": {
+      "main": [
+        [
+          {
+            "node": "Extract Channel IDs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch": {
+      "main": [
+        [
+          {
+            "node": "Append to Google Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "scrapingbee API request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "scrapingbee API request": {
+      "main": [
+        [
+          {
+            "node": "Email Extraction Filter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Email Extraction Filter": {
+      "main": [
+        [
+          {
+            "node": "Deep Scrape Groq AI Prompt.",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Deep Scrape Groq AI Prompt.": {
+      "main": [
+        [
+          {
+            "node": "Append to Google Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Append to Google Sheet": {
+      "main": [
+        []
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "tags": []
+}
